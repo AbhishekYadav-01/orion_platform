@@ -10,3 +10,11 @@ torch
 transformers
 scikit-learn
 tqdm
+gymnasium
+pettingzoo
+stable-baselines3
+sb3-contrib
+supersuit
+matplotlib
+fastapi
+uvicorn[standard]

@@ -124,6 +124,11 @@ def fetch_reddit(ticker, stock_id):
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
+
+    all_stocks = session.query(Stock).all()
+    TICKERS = [stock.ticker for stock in all_stocks]
+    print(f"Found tickers in DB: {TICKERS}")
+
     for ticker in TICKERS:
         stock = session.query(Stock).filter_by(ticker=ticker).first()
         if stock:

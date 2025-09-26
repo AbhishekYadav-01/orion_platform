@@ -9,24 +9,16 @@ from sqlalchemy import Column, Integer, String, Float, Date
 from dotenv import load_dotenv
 from urllib.parse import quote_plus
 
-# --- CONFIGURATION ---
 load_dotenv()
 
+DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
-
 DB_PASSWORD_ENCODED = quote_plus(DB_PASSWORD)
 
-TICKERS = ["AAPL", "MSFT", "TSLA", "NVDA"]
-
-# --- DATABASE SETUP ---
-DATABASE_URL = (
-    f"postgresql://{DB_USER}:{DB_PASSWORD_ENCODED}@{DB_HOST}/{DB_NAME}"
-)
-
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD_ENCODED}@{DB_HOST}/{DB_NAME}"
 engine = create_engine(DATABASE_URL)
 Base = declarative_base()
 
@@ -51,28 +43,26 @@ Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()
 
-# --- DATA FETCHING ---
 def fetch_stock_data(symbol):
-    """Fetches historical stock data from Alpha Vantage."""
     print(f"Fetching data for {symbol}...")
     url = (
         f'https://www.alphavantage.co/query?'
-        f'function=TIME_SERIES_DAILY'  
+        f'function=TIME_SERIES_DAILY'
         f'&symbol={symbol}'
         f'&outputsize=full'
         f'&apikey={ALPHA_VANTAGE_API_KEY}'
     )
+    # ... (rest of the function is identical)
     try:
         r = requests.get(url)
         r.raise_for_status()
         data = r.json()
         
-        if "Error Message" in data:
-            print(f"  Error fetching data for {symbol}: {data['Error Message']}")
+        if "Error Message" in data or "Information" in data or "Note" in data:
+            print(f"  API Error/Limit for {symbol}: {data}")
             return None
         if "Time Series (Daily)" not in data:
-            print(f"  Unexpected response for {symbol}. It might be an invalid ticker or API limit.")
-
+            print(f"  Unexpected response for {symbol}.")
             return None
 
         df = pd.DataFrame(data['Time Series (Daily)']).T
@@ -83,7 +73,7 @@ def fetch_stock_data(symbol):
             '2. high': 'high',
             '3. low': 'low',
             '4. close': 'close',
-            '5. volume': 'volume' 
+            '5. volume': 'volume'
         })
         
         df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
@@ -96,29 +86,25 @@ def fetch_stock_data(symbol):
         print(f"  An error occurred: {e}")
         return None
 
-# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    if not all([DB_PASSWORD, ALPHA_VANTAGE_API_KEY]):
-        print("Error: Database password or API key is not set in the .env file.")
-    else:
-        for ticker in TICKERS:
-            stock = session.query(Stock).filter_by(ticker=ticker).first()
-            if not stock:
-                print(f"Ticker {ticker} not found in DB. Adding it.")
-                stock = Stock(ticker=ticker, company_name=f"Company for {ticker}")
-                session.add(stock)
-                session.commit()
+    # --- THIS IS THE MAIN CHANGE ---
+    # Fetch all tickers directly from the database
+    all_stocks = session.query(Stock).all()
+    TICKERS = [stock.ticker for stock in all_stocks]
+    print(f"Found tickers in DB: {TICKERS}")
+
+    for ticker in TICKERS:
+        stock = session.query(Stock).filter_by(ticker=ticker).first()
+        price_df = fetch_stock_data(ticker)
+        
+        if price_df is not None and not price_df.empty:
+            price_df['stock_id'] = stock.id
+            price_df.reset_index(inplace=True)
+            price_df.rename(columns={'index': 'date'}, inplace=True)
             
-            price_df = fetch_stock_data(ticker)
+            print(f"  Inserting data for {ticker} into the database...")
+            price_df.to_sql('stock_prices', engine, if_exists='append', index=False, chunksize=1000)
+            print(f"  Data insertion for {ticker} complete.")
             
-            if price_df is not None and not price_df.empty:
-                price_df['stock_id'] = stock.id
-                price_df.reset_index(inplace=True)
-                price_df.rename(columns={'index': 'date'}, inplace=True)
-                
-                print(f"  Inserting data for {ticker} into the database...")
-                price_df.to_sql('stock_prices', engine, if_exists='append', index=False)
-                print(f"  Data insertion for {ticker} complete.")
-                
-        session.close()
-        print("\nData ingestion process finished.")
+    session.close()
+    print("\nData ingestion process finished.")
