@@ -2,3 +2,11 @@ pandas
 numpy
 SQLAlchemy
 psycopg2-binary
+requests
+python-dotenv
+newsapi-python
+praw
+torch
+transformers
+scikit-learn
+tqdm
